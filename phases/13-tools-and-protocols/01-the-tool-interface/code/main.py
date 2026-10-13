@@ -54,6 +54,9 @@ def tool_get_weather(args: dict) -> dict:
     temp = fake.get(city, 20)
     return {"city": city, "temp": temp, "units": units}
 
+def delete_file(args: dict):
+    return {"deleted": args["path"]}
+
 
 REGISTRY: list[Tool] = [
     Tool(
@@ -69,6 +72,7 @@ REGISTRY: list[Tool] = [
                 "b": {"type": "number"},
             },
             "required": ["a", "b"],
+            "additionalProperties": False,
         },
         executor=tool_add,
     ),
@@ -84,6 +88,7 @@ REGISTRY: list[Tool] = [
                 "timezone": {"type": "string"},
             },
             "required": [],
+            "additionalProperties": False,
         },
         executor=tool_get_time,
     ),
@@ -100,8 +105,26 @@ REGISTRY: list[Tool] = [
                 "units": {"type": "string", "enum": ["celsius", "fahrenheit"]},
             },
             "required": ["city"],
+            "additionalProperties": False,
         },
         executor=tool_get_weather,
+    ),
+    Tool(
+        name="delete_file",
+        description=(
+            "Use when the user asks to delete a file. "
+            "Do not use for deleting directory, emptying trach, or movement. "
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        executor=delete_file,
+        consequential=True,
     ),
 ]
 
@@ -118,8 +141,12 @@ def validate(schema: dict, value: Any) -> list[str]:
         for key, sub in schema.get("properties", {}).items():
             if key in value:
                 errors.extend(validate(sub, value[key]))
+        if schema.get("additionalProperties", False) is False:
+            for k in value:
+                if k not in schema.get("properties", {}):
+                    errors.append(f"unexpected field '{k}'")
         return errors
-    if t == "number" and not isinstance(value, (int, float)):
+    if t == "number" and (not isinstance(value, (int, float)) or isinstance(value, bool)):
         errors.append(f"expected number, got {type(value).__name__}")
     if t == "string" and not isinstance(value, str):
         errors.append(f"expected string, got {type(value).__name__}")
@@ -172,6 +199,18 @@ def fake_decide(user_msg: str, history: list[dict]) -> dict:
                 }
             ]
         }
+    match = re.search(r"delete (\S+)", user_msg)
+    if match:
+        path = match.group(1)
+        return {
+                    "tool_calls": [
+                        {
+                            "id": f"call_{uuid.uuid4().hex[:8]}",
+                            "name": "delete_file",
+                            "arguments": {"path": path},
+                        }
+                    ]
+                }
     return {"content": "I cannot route that query to any registered tool."}
 
 
@@ -200,6 +239,11 @@ def run_loop(user_msg: str) -> None:
                 return
             if tool.consequential:
                 print("           GATE : tool is consequential, would confirm")
+                history.append({
+                    "role": "tool", "id": call["id"], "name": tool.name,
+                    "content": json.dumps({"error": "blocked: requires user confirmation"}),
+                })
+                continue
             start = time.perf_counter()
             result = tool.executor(call["arguments"])
             ms = (time.perf_counter() - start) * 1000
@@ -232,6 +276,7 @@ def main() -> None:
         "what time is it?",
         "tell me the weather in Bengaluru",
         "write me a haiku about tea",
+        "delete notes.txt"
     ):
         run_loop(query)
         print()
