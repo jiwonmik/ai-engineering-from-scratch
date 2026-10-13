@@ -77,6 +77,26 @@ def gram_schmidt(vectors):
         orthonormal.append(w.normalize())
     return orthonormal
 
+def is_orthonormal(vectors: list[Vector], tol=1e-9):
+    # vectors: Vector 객체의 리스트
+    # 정규직교이면 True, 아니면 False
+    
+    # 조건 1: 모든 벡터의 길이가 1
+    # 조건 2: 서로 다른 모든 쌍의 내적이 0
+    
+    for v in vectors:
+        amount = v.magnitude()
+        if abs(amount-1) > tol:
+            return False
+    
+    for i in range(len(vectors)-1):
+        for j in range(i+1, len(vectors)):
+            check = vectors[i].dot(vectors[j])
+            if abs(check-0) > tol:
+                return False
+    return True
+    
+
 
 class Matrix:
     def __init__(self, rows):
